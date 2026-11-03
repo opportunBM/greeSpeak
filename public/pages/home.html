@@ -5,13 +5,21 @@
       <h1 id="hero-title">Your day,<br />in good hands.</h1>
       <p class="muted">Choose English or French and watch your words appear as you talk.</p>
     </div>
-    <div class="home-shortcut">
-      <p class="eyebrow">Go to</p>
-      <div class="home-links">
-        <a class="text-button" href="/notes.html">Notes</a>
-        <a class="text-button" href="/calendar.html">Calendar</a>
-        <a class="text-button" href="/clock.html">Clock</a>
-      </div>
-    </div>
   </div>
+  <section class="assistant-chat" aria-label="Assistant chat">
+    <div class="conversation-toolbar">
+      <button id="delete-selected-messages" class="text-button danger-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg>Delete selected</button>
+      <button id="clear-conversation" class="text-button danger-action" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>Clear conversation</button>
+    </div>
+    <div id="chat-messages" class="messages" aria-live="polite"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" type="text" placeholder="Type a message..." autocomplete="off" aria-label="Your message" />
+      <button class="send-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Zm0 0L11 13"/></svg>Send</button>
+    </form>
+    <div class="suggestions" aria-label="Suggested requests">
+      <button type="button" class="suggestion" data-prompt="What do I have planned?">Ask about my day</button>
+      <button type="button" class="suggestion" data-prompt="Open my notes">Open notes</button>
+      <button type="button" class="suggestion" data-prompt="Open the calendar">Open calendar</button>
+    </div>
+  </section>
 </section>

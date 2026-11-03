@@ -2,27 +2,16 @@
   <header class="topbar">
     <a class="brand" href="/home.html"><span class="brand-mark" aria-hidden="true">g</span>greeSpeak</a>
     <nav class="navigation" aria-label="Main navigation">
-      <a class="nav-button" data-nav="home" href="/home.html">Home</a>
-      <a class="nav-button" data-nav="notes" href="/notes.html">Notes</a>
-      <a class="nav-button" data-nav="calendar" href="/calendar.html">Calendar</a>
-      <a class="nav-button" data-nav="clock" href="/clock.html">Clock</a>
+      <a class="nav-button" data-nav="home" href="/home.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z"/></svg>Home</a>
+      <a class="nav-button" data-nav="notes" href="/notes.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 5h6m-6 4h6m-6 4h4"/></svg>Notes</a>
+      <a class="nav-button" data-nav="calendar" href="/calendar.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v4m10-4v4M4 9h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Zm3 8h2m4 0h2m-8 4h2"/></svg>Calendar</a>
+      <a class="nav-button" data-nav="clock" href="/clock.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Clock</a>
     </nav>
+    <button id="logout-button" class="text-button logout-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5m5 5H3m9-9h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7"/></svg>Log out</button>
   </header>
   <div id="page-content"><!-- page content --></div>
-  <section class="assistant-chat" aria-label="Assistant chat">
-    <div id="chat-messages" class="messages" aria-live="polite"></div>
-    <form id="chat-form" class="chat-form">
-      <input id="chat-input" type="text" placeholder="Type a message..." autocomplete="off" aria-label="Your message" />
-      <button class="send-button" type="submit">Send</button>
-    </form>
-    <div class="suggestions" aria-label="Suggested requests">
-      <button type="button" class="suggestion" data-prompt="What do I have planned?">Ask about my day</button>
-      <button type="button" class="suggestion" data-prompt="Open my notes">Open notes</button>
-      <button type="button" class="suggestion" data-prompt="Open the calendar">Open calendar</button>
-    </div>
-  </section>
   <div class="assistant-visual">
-    <button id="mic-button" class="orb-button" type="button" aria-label="Start speaking">
+    <button id="mic-button" class="orb-button" type="button" aria-label="Start voice call" aria-pressed="false" title="Start a hands-free voice call">
       <span class="orb-ring"></span>
       <span class="orb-core">
         <svg class="voice-icon voice-icon-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4m-4 0h8"/></svg>

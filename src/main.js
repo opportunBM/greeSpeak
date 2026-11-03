@@ -3,9 +3,12 @@ const $ = (selector) => document.querySelector(selector);
 const STORAGE_NOTES = "assistant-notes";
 const STORAGE_TASKS = "assistant-tasks";
 const STORAGE_CLOCK = "assistant-clock";
+const STORAGE_CHAT = "greespeak-chat";
 
 let notes = readList(STORAGE_NOTES);
 let tasks = readList(STORAGE_TASKS);
+let chatMessages = readChatMessages();
+const selectedMessageIds = new Set();
 const savedClockState = readClockState();
 let recognition;
 let recognitionActive = false;
@@ -13,6 +16,10 @@ let speechSendTimeout;
 let nativeSpeechTimeout;
 let recorderState;
 let replyPending = false;
+let voiceCallActive = sessionStorage.getItem("greespeak-voice-call") === "true";
+let voiceCallStarting = false;
+let voiceTurnPending = false;
+let voiceCallStartTimer;
 let speechRequestId = 0;
 let speechAbortController;
 let speechAudioContext;
@@ -73,9 +80,28 @@ function readClockState() {
   }
 }
 
+function readChatMessages() {
+  try {
+    const messages = JSON.parse(localStorage.getItem(STORAGE_CHAT) || "[]");
+    if (!Array.isArray(messages)) return [];
+    return messages.filter((message) =>
+      message
+      && typeof message.id === "string"
+      && typeof message.text === "string"
+      && (message.sender === "assistant" || message.sender === "user"),
+    );
+  } catch {
+    return [];
+  }
+}
+
 function saveLists() {
   localStorage.setItem(STORAGE_NOTES, JSON.stringify(notes));
   localStorage.setItem(STORAGE_TASKS, JSON.stringify(tasks));
+}
+
+function saveChatMessages() {
+  localStorage.setItem(STORAGE_CHAT, JSON.stringify(chatMessages));
 }
 
 function saveClockState() {
@@ -92,12 +118,84 @@ function saveClockState() {
 
 document.querySelector(`[data-nav="${currentPage}"]`)?.classList.add("active");
 
+function logout() {
+  stopVoiceCall("Call ended");
+  sessionStorage.removeItem("greespeak-user");
+  sessionStorage.removeItem("greespeak-language");
+  sessionStorage.removeItem("greespeak-pending-message");
+  sessionStorage.removeItem("greespeak-pending-command");
+  window.location.replace("/");
+}
+
+$("#logout-button").addEventListener("click", logout);
+
 function addChatMessage(text, sender) {
-  const message = document.createElement("div");
-  message.className = `message ${sender}-message`;
-  message.textContent = text;
-  $("#chat-messages").append(message);
-  $("#chat-messages").scrollTop = $("#chat-messages").scrollHeight;
+  chatMessages.push({ id: crypto.randomUUID(), text, sender });
+  saveChatMessages();
+  renderChatMessages();
+}
+
+function renderChatMessages() {
+  const list = $("#chat-messages");
+  if (!list) return;
+  list.replaceChildren();
+
+  if (!chatMessages.length) {
+    list.textContent = "No messages yet. Start a conversation!";
+  }
+  chatMessages.forEach((entry) => {
+    const message = document.createElement("div");
+    message.className = `message ${entry.sender}-message`;
+    const selectLabel = document.createElement("label");
+    selectLabel.className = "message-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedMessageIds.has(entry.id);
+    checkbox.setAttribute("aria-label", "Select message");
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedMessageIds.add(entry.id);
+      else selectedMessageIds.delete(entry.id);
+      updateConversationActions();
+    });
+    selectLabel.append(checkbox);
+
+    const content = document.createElement("span");
+    content.className = "message-text";
+    content.textContent = entry.text;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "delete-button message-delete";
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg><span>Delete</span>';
+    remove.setAttribute("aria-label", "Delete message");
+    remove.title = "Delete message";
+    remove.addEventListener("click", () => deleteChatMessages(new Set([entry.id])));
+
+    message.append(selectLabel, content, remove);
+    list.append(message);
+  });
+  list.scrollTop = list.scrollHeight;
+  updateConversationActions();
+}
+
+function updateConversationActions() {
+  const deleteSelected = $("#delete-selected-messages");
+  if (deleteSelected) {
+    deleteSelected.disabled = selectedMessageIds.size === 0;
+    deleteSelected.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg><span>Delete selected${selectedMessageIds.size ? ` (${selectedMessageIds.size})` : ""}</span>`;
+  }
+  const clearConversation = $("#clear-conversation");
+  if (clearConversation) {
+    clearConversation.disabled = chatMessages.length === 0;
+    clearConversation.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg><span>Clear conversation</span>';
+  }
+}
+
+function deleteChatMessages(ids) {
+  chatMessages = chatMessages.filter((message) => !ids.has(message.id));
+  ids.forEach((id) => selectedMessageIds.delete(id));
+  saveChatMessages();
+  renderChatMessages();
 }
 
 function setSpeakingState() {
@@ -109,9 +207,113 @@ function setSpeakingState() {
 function finishSpeaking() {
   $("#voice-status").textContent = "Ready";
   $("#mic-button").classList.remove("speaking");
+  if (voiceCallActive) resumeVoiceCallListening();
+}
+
+function updateVoiceCallButton() {
+  const button = $("#mic-button");
+  button.setAttribute("aria-pressed", String(voiceCallActive));
+  button.setAttribute("aria-label", voiceCallActive ? "End voice call" : "Start voice call");
+  button.title = voiceCallActive ? "End voice call" : "Start a hands-free voice call";
+  button.classList.toggle("call-active", voiceCallActive);
+}
+
+updateVoiceCallButton();
+
+function pauseVoiceCallInput() {
+  clearTimeout(speechSendTimeout);
+  speechSendTimeout = null;
+  clearTimeout(nativeSpeechTimeout);
+  if (recorderState) recorderState.fallbackPending = false;
+  if (recorderState && !recorderState.recorder) recorderState = null;
+  if (recognition && recognitionActive) recognition.stop();
+  if (recorderState?.recorder?.state === "recording") {
+    recorderState.discard = true;
+    recorderState.manualStop = true;
+    recorderState.fallbackPending = false;
+    recorderState.recorder.stop();
+  }
+}
+
+function resumeVoiceCallListening() {
+  if (!voiceCallActive) return;
+  voiceTurnPending = false;
+  clearTimeout(voiceCallStartTimer);
+  voiceCallStartTimer = window.setTimeout(() => {
+    startVoiceCallListening();
+  }, 500);
+}
+
+async function startVoiceCallListening() {
+  const micButton = $("#mic-button");
+  if (!voiceCallActive
+    || voiceCallStarting
+    || replyPending
+    || recognitionActive
+    || recorderState
+    || micButton.classList.contains("speaking")
+    || micButton.classList.contains("thinking")) return;
+  voiceCallStarting = true;
+  $("#mic-button").classList.remove("speaking", "thinking");
+  $("#voice-status").textContent = "Connecting microphone...";
+
+  const started = await startRecordedSpeech(Boolean(recognition));
+  if (!started) {
+    voiceCallStarting = false;
+    stopVoiceCall($("#voice-status").textContent || "Could not start the microphone.");
+    return;
+  }
+  if (!voiceCallActive) {
+    pauseVoiceCallInput();
+    voiceCallStarting = false;
+    return;
+  }
+  if (recognition) {
+    recognition.lang = voiceLanguageSelect.value;
+    try {
+      recognition.start();
+    } catch (error) {
+      voiceCallStarting = false;
+      $("#voice-status").textContent = error instanceof Error
+        ? `Could not start speech recognition: ${error.message}`
+        : "Could not start speech recognition.";
+      pauseVoiceCallInput();
+      stopVoiceCall($("#voice-status").textContent);
+      return;
+    }
+  }
+  voiceCallStarting = false;
+}
+
+function startVoiceCall() {
+  voiceCallActive = true;
+  voiceTurnPending = false;
+  sessionStorage.setItem("greespeak-voice-call", "true");
+  updateVoiceCallButton();
+  startVoiceCallListening();
+}
+
+function stopVoiceCall(status = "Call ended") {
+  voiceCallActive = false;
+  voiceTurnPending = false;
+  voiceCallStarting = false;
+  sessionStorage.removeItem("greespeak-voice-call");
+  clearTimeout(voiceCallStartTimer);
+  pauseVoiceCallInput();
+  speechRequestId += 1;
+  speechAbortController?.abort();
+  speechSources.forEach((source) => source.stop());
+  speechSources.clear();
+  $("#mic-button").classList.remove("listening", "thinking", "speaking");
+  $("#voice-status").textContent = status;
+  updateVoiceCallButton();
 }
 
 async function speak(text, language = getSelectedLanguage()) {
+  if (voiceCallActive) {
+    voiceTurnPending = true;
+    pauseVoiceCallInput();
+  }
   const requestId = ++speechRequestId;
   speechAbortController?.abort();
   speechAbortController = new AbortController();
@@ -164,6 +366,7 @@ async function speak(text, language = getSelectedLanguage()) {
     $("#mic-button").classList.remove("thinking", "speaking");
     $("#voice-status").textContent = "Voice unavailable";
     addChatMessage(error instanceof Error ? error.message : "Could not play the voice response.", "assistant");
+    if (voiceCallActive) resumeVoiceCallListening();
   }
 }
 
@@ -365,11 +568,11 @@ function isValidAction(action) {
 }
 
 function getAssistantContext() {
-  const history = Array.from($("#chat-messages").querySelectorAll(".message"))
+  const history = chatMessages
     .slice(-8)
-    .map((item) => ({
-      role: item.classList.contains("user-message") ? "user" : "assistant",
-      content: item.textContent.slice(0, 1000),
+    .map((message) => ({
+      role: message.sender,
+      content: message.text.slice(0, 1000),
     }));
   return {
     currentDate: new Date().toISOString(),
@@ -390,7 +593,7 @@ function getAssistantContext() {
 
 function getNavigationCommand(message) {
   const normalized = message.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
-  const intent = /\b(go|open|show|take|navigate|switch|visit|head|return|back|va|ouvre|affiche|montre|aller|amene|reviens|retourne|accede)\b/.test(normalized);
+  const intent = /\b(go|open|show|take|navigate|switch|visit|head|return|back|va|ouvre|affiche|montre|aller|amene|ramene|reviens|revenir|retourner|retour|retourne|accede)\b/.test(normalized);
   if (!intent) return null;
 
   const page = /\b(home|homepage|chat|accueil)\b/.test(normalized)
@@ -411,7 +614,23 @@ function getNavigationCommand(message) {
   return { page, reply };
 }
 
+function isLogoutCommand(message) {
+  const normalized = message.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+  return /\b(log\s*(?:me\s*)?out|sign\s*(?:me\s*)?out|logout|sign\s*off|logoff|disconnect(?:\s+me)?|deconnect(?:e|er|ion)(?:[- ]moi)?|quitte(?:[- ]la)?\s*session|ferme(?:[- ]la)?\s*session)\b/.test(normalized);
+}
+
+function isVoiceCallStopCommand(message) {
+  const normalized = message.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+  return /\b(end|stop|close|hang up|finish)\s+(?:the\s+)?(?:voice\s+)?call\b/.test(normalized)
+    || /\b(stop|pause|disable)\s+(?:the\s+)?(?:voice\s+)?listening\b/.test(normalized)
+    || /\b(termine|arrete|stoppe|raccroche|finis)\s+(?:l'appel|l ecoute|la conversation vocale|l appel)\b/.test(normalized)
+    || /\b(arrete|stoppe)\s+(?:d'?ecouter|l'assistant vocal)\b/.test(normalized);
+}
+
 async function askAssistant(message) {
+  if (isLogoutCommand(message)) {
+    return getSelectedLanguage() === "fr" ? "Je vous déconnecte." : "Logging you out.";
+  }
   const navigation = getNavigationCommand(message);
   if (navigation) return navigation.reply;
   const directAction = commandAction(message);
@@ -453,11 +672,29 @@ async function askAssistant(message) {
     : "I could not generate a reply. Please try again.");
 }
 
-async function sendMessage(message) {
+async function sendMessage(message, recordUser = true) {
   const text = message.trim();
   if (!text || replyPending) return;
+  if (voiceCallActive && isVoiceCallStopCommand(text)) {
+    addChatMessage(text, "user");
+    const reply = getSelectedLanguage() === "fr" ? "J'ai terminé l'appel vocal." : "The voice call has ended.";
+    addChatMessage(reply, "assistant");
+    stopVoiceCall("Call ended");
+    speak(reply);
+    return;
+  }
+  const submittedDuringVoiceCall = voiceCallActive;
+  voiceTurnPending = voiceCallActive;
+  pauseVoiceCallInput();
+  if (isLogoutCommand(text)) {
+    if (recordUser) addChatMessage(text, "user");
+    addChatMessage(getSelectedLanguage() === "fr" ? "Je vous déconnecte." : "Logging you out.", "assistant");
+    logout();
+    return;
+  }
   const navigation = getNavigationCommand(text);
   if (navigation && navigation.page !== currentPage) {
+    if (recordUser) addChatMessage(text, "user");
     sessionStorage.setItem("greespeak-pending-message", JSON.stringify({
       message: navigation.reply,
       sender: "assistant",
@@ -470,44 +707,42 @@ async function sendMessage(message) {
   const directAction = commandAction(text);
   const clockActions = new Set(["START_STOPWATCH", "STOP_STOPWATCH", "RESET_STOPWATCH", "START_TIMER", "STOP_TIMER"]);
   if (currentPage !== "clock" && directAction && clockActions.has(directAction.action)) {
+    if (recordUser) addChatMessage(text, "user");
     sessionStorage.setItem("greespeak-pending-command", text);
     window.location.assign("/clock.html");
     return;
   }
+  if (currentPage !== "home" && !directAction) {
+    if (recordUser) addChatMessage(text, "user");
+    sessionStorage.setItem("greespeak-pending-command", text);
+    window.location.assign("/home.html");
+    return;
+  }
   replyPending = true;
   const sendButton = $('#chat-form button[type="submit"]');
-  sendButton.disabled = true;
-  const backupRecording = recorderState;
-  if (backupRecording?.recorder?.state === "recording") {
-    backupRecording.discard = true;
-    backupRecording.recorder.stop();
-  }
-  if (recognition && recognitionActive) {
-    clearTimeout(speechSendTimeout);
-    speechSendTimeout = null;
-    recognition.stop();
-  }
-  addChatMessage(text, "user");
-  $("#chat-input").value = "";
+  if (sendButton) sendButton.disabled = true;
+  if (recordUser) addChatMessage(text, "user");
+  if ($("#chat-input")) $("#chat-input").value = "";
   $("#voice-status").textContent = "Thinking...";
   $("#mic-button").classList.remove("listening", "speaking");
   $("#mic-button").classList.add("thinking");
   try {
     const reply = await askAssistant(text);
     addChatMessage(reply, "assistant");
-    speak(reply);
+    if (!submittedDuringVoiceCall || voiceCallActive) speak(reply);
   } catch (error) {
     const reply = error instanceof Error ? error.message : "The AI could not answer right now.";
     addChatMessage(reply, "assistant");
     $("#voice-status").textContent = "AI error — see the message above";
+    if (voiceCallActive) resumeVoiceCallListening();
   } finally {
     replyPending = false;
-    sendButton.disabled = false;
+    if (sendButton) sendButton.disabled = false;
     $("#mic-button").classList.remove("thinking");
   }
 }
 
-$("#chat-form").addEventListener("submit", (event) => {
+$("#chat-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   sendMessage($("#chat-input").value);
 });
@@ -516,6 +751,12 @@ document.querySelectorAll("[data-prompt]").forEach((button) => {
     $("#chat-input").value = button.dataset.prompt;
     $("#chat-input").focus();
   });
+});
+$("#delete-selected-messages")?.addEventListener("click", () => {
+  deleteChatMessages(new Set(selectedMessageIds));
+});
+$("#clear-conversation")?.addEventListener("click", () => {
+  deleteChatMessages(new Set(chatMessages.map((message) => message.id)));
 });
 
 function initSpeechRecognition() {
@@ -531,10 +772,15 @@ function initSpeechRecognition() {
   recognition.interimResults = true;
   recognition.onstart = () => {
     recognitionActive = true;
+    if (!voiceCallActive) {
+      recognition.stop();
+      return;
+    }
     $("#voice-status").textContent = "Listening...";
     $("#mic-button").classList.add("listening");
     clearTimeout(nativeSpeechTimeout);
     nativeSpeechTimeout = setTimeout(() => {
+      if (!recognitionActive || voiceTurnPending) return;
       if (recorderState?.recorder) {
         recorderState.fallbackPending = true;
       } else {
@@ -542,10 +788,10 @@ function initSpeechRecognition() {
       }
       $("#voice-status").textContent = "Speech service is slow — switching to voice recording...";
       recognition.stop();
-    }, 5000);
+    }, voiceCallActive ? 15000 : 5000);
   };
   recognition.onresult = (event) => {
-    if (recorderState?.manualStop) return;
+    if (recorderState?.manualStop || voiceTurnPending) return;
     clearTimeout(nativeSpeechTimeout);
     nativeSpeechTimeout = null;
     const words = Array.from(event.results)
@@ -560,13 +806,14 @@ function initSpeechRecognition() {
     clearTimeout(speechSendTimeout);
     speechSendTimeout = setTimeout(() => {
       speechSendTimeout = null;
-      recognition.stop();
+      voiceTurnPending = voiceCallActive;
       sendMessage($("#chat-input").value);
     }, 2000);
   };
   recognition.onerror = (event) => {
     clearTimeout(nativeSpeechTimeout);
     nativeSpeechTimeout = null;
+    if (event.error === "aborted" && !voiceCallActive) return;
     const errors = {
       "not-allowed": "Microphone access was denied. Allow microphone access in your browser's site settings, then reload the page.",
       "service-not-allowed": "Your browser blocked its speech recognition service. Try Chrome or Edge and check your browser's privacy settings.",
@@ -589,7 +836,12 @@ function initSpeechRecognition() {
       recorderState.discard = true;
       recorderState.recorder.stop();
     }
-    $("#voice-status").textContent = errors[event.error] || `Microphone error: ${event.error}. Check your browser permissions and try again.`;
+    const message = errors[event.error] || `Microphone error: ${event.error}. Check your browser permissions and try again.`;
+    if (voiceCallActive && !["network", "no-speech", "service-not-allowed"].includes(event.error)) {
+      stopVoiceCall(message);
+      return;
+    }
+    $("#voice-status").textContent = message;
   };
   recognition.onend = () => {
     recognitionActive = false;
@@ -600,8 +852,14 @@ function initSpeechRecognition() {
         $("#voice-status").textContent = "Listening... Speak now. It sends after a 2-second pause.";
       } else {
         recorderState = null;
-        window.setTimeout(() => startRecordedSpeech(false), 200);
+        window.setTimeout(() => {
+          if (!recorderState) startRecordedSpeech(false);
+        }, 200);
       }
+      return;
+    }
+    if (voiceCallActive && !voiceTurnPending && !replyPending && !recorderState) {
+      resumeVoiceCallListening();
       return;
     }
     if (!recorderState && !speechSendTimeout) {
@@ -686,16 +944,18 @@ async function transcribeRecording(blob) {
 }
 
 async function startRecordedSpeech(monitorOnly = false) {
-  if (recorderState) return;
+  if (recorderState) return false;
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || !window.AudioContext) {
     $("#voice-status").textContent = "Voice recording is not supported here. Use Chrome or Edge on localhost or HTTPS.";
     $("#mic-button").classList.remove("listening");
-    return;
+    return false;
   }
 
+  let stream;
+  let audioContext;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const audioContext = new AudioContext();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioContext = new AudioContext();
     await audioContext.resume();
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 1024;
@@ -731,7 +991,10 @@ async function startRecordedSpeech(monitorOnly = false) {
       if (state.discard) return;
       const recording = new Blob(state.chunks, { type: recorder.mimeType });
       if (!state.heardVoice || recording.size === 0) {
-        $("#voice-status").textContent = "No speech detected. Click the orb and try again.";
+        $("#voice-status").textContent = voiceCallActive
+          ? "No speech detected. Listening again..."
+          : "No speech detected. Click the orb and try again.";
+        if (voiceCallActive) resumeVoiceCallListening();
         return;
       }
       $("#voice-status").textContent = "Transcribing your voice...";
@@ -741,6 +1004,7 @@ async function startRecordedSpeech(monitorOnly = false) {
         const message = error instanceof Error ? error.message : "Could not transcribe your voice.";
         $("#voice-status").textContent = message;
         addChatMessage(message, "assistant");
+        if (voiceCallActive) resumeVoiceCallListening();
       }
     };
     recorder.start(250);
@@ -768,6 +1032,11 @@ async function startRecordedSpeech(monitorOnly = false) {
         return;
       }
       if (now - state.startedAt >= 30000) {
+        if (state.monitorOnly) {
+          state.discard = true;
+          recorder.stop();
+          return;
+        }
         $("#voice-status").textContent = "Maximum recording time reached — sending...";
         recorder.stop();
         return;
@@ -775,7 +1044,10 @@ async function startRecordedSpeech(monitorOnly = false) {
       state.frame = requestAnimationFrame(listen);
     };
     state.frame = requestAnimationFrame(listen);
+    return true;
   } catch (error) {
+    stream?.getTracks().forEach((track) => track.stop());
+    if (audioContext && audioContext.state !== "closed") await audioContext.close();
     const message = error instanceof DOMException && error.name === "NotAllowedError"
       ? "Microphone access was denied. Allow microphone access in your browser's site settings."
       : error instanceof DOMException && error.name === "NotFoundError"
@@ -785,59 +1057,16 @@ async function startRecordedSpeech(monitorOnly = false) {
           : "Could not start microphone recording.";
     $("#voice-status").textContent = message;
     $("#mic-button").classList.remove("listening");
+    return false;
   }
 }
 
 $("#mic-button").addEventListener("click", () => {
-  if (recorderState?.fallbackPending) return;
-  if (recorderState?.recorder) {
-    if (recorderState.recorder.state === "recording") {
-      recorderState.manualStop = true;
-      recorderState.monitorOnly = false;
-      clearTimeout(speechSendTimeout);
-      clearTimeout(nativeSpeechTimeout);
-      if (recognition && recognitionActive) recognition.stop();
-      recorderState.recorder.stop();
-    }
+  if (voiceCallActive) {
+    stopVoiceCall();
     return;
   }
-  clearTimeout(speechSendTimeout);
-  speechSendTimeout = null;
-  clearTimeout(nativeSpeechTimeout);
-  $("#mic-button").classList.remove("thinking", "speaking");
-  const voiceLanguage = voiceLanguageSelect.value;
-  if (!recognition) {
-    $("#chat-input").value = "";
-    startRecordedSpeech(false);
-  } else {
-    recognition.lang = voiceLanguage;
-    $("#chat-input").value = "";
-    $("#voice-status").textContent = "Checking microphone...";
-    if (!navigator.mediaDevices?.getUserMedia) {
-      $("#voice-status").textContent = "Microphone access requires localhost or a secure HTTPS website.";
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        stream.getTracks().forEach((track) => track.stop());
-        return startRecordedSpeech(true);
-      })
-      .then(() => {
-        try {
-          recognition.start();
-        } catch {
-          $("#voice-status").textContent = "Microphone is already active.";
-        }
-      })
-      .catch((error) => {
-        const message = error instanceof DOMException && error.name === "NotAllowedError"
-          ? "Microphone access was denied. Allow microphone access in your browser's site settings."
-          : error instanceof DOMException && error.name === "NotFoundError"
-            ? "No microphone was found. Connect or select a microphone, then try again."
-            : "Could not access the microphone. Check that it is connected and allowed.";
-        $("#voice-status").textContent = message;
-      });
-  }
+  startVoiceCall();
 });
 initSpeechRecognition();
 
@@ -870,7 +1099,7 @@ function renderNotes() {
     content.append(text);
     const remove = document.createElement("button");
     remove.className = "delete-button";
-    remove.textContent = "Delete";
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg><span>Delete</span>';
     remove.addEventListener("click", () => {
       notes = notes.filter((entry) => entry.id !== note.id);
       saveLists();
@@ -948,7 +1177,7 @@ function renderTasks() {
       label.append(meta);
       const remove = document.createElement("button");
       remove.className = "delete-button";
-      remove.textContent = "Delete";
+      remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg><span>Delete</span>';
       remove.addEventListener("click", () => {
         tasks = tasks.filter((entry) => entry.id !== task.id);
         saveLists();
@@ -1146,11 +1375,13 @@ if (currentPage === "clock") {
 
 renderNotes();
 renderTasks();
+renderChatMessages();
 
 const pendingMessage = sessionStorage.getItem("greespeak-pending-message");
-if (pendingMessage) {
+const pendingMessageData = pendingMessage ? JSON.parse(pendingMessage) : null;
+if (pendingMessageData) {
   sessionStorage.removeItem("greespeak-pending-message");
-  const { message, sender, speak: shouldSpeak, language } = JSON.parse(pendingMessage);
+  const { message, sender, speak: shouldSpeak, language } = pendingMessageData;
   addChatMessage(message, sender);
   if (shouldSpeak) speak(message, language);
 }
@@ -1158,5 +1389,9 @@ if (pendingMessage) {
 const pendingCommand = sessionStorage.getItem("greespeak-pending-command");
 if (pendingCommand) {
   sessionStorage.removeItem("greespeak-pending-command");
-  sendMessage(pendingCommand);
+  sendMessage(pendingCommand, false);
+}
+
+if (voiceCallActive && !pendingCommand && !pendingMessageData?.speak) {
+  resumeVoiceCallListening();
 }
