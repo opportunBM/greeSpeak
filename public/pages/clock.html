@@ -1,0 +1,37 @@
+<section id="clock" class="page active">
+  <div class="section-heading">
+    <div><p class="eyebrow">Tools</p><h1>Clock</h1></div>
+    <a class="text-button" href="/home.html">Back to home</a>
+  </div>
+  <div class="clock-card">
+    <p class="eyebrow">Current time</p>
+    <div id="digital-clock" class="digital-clock">--:--:--</div>
+  </div>
+  <div class="clock-tabs">
+    <button class="clock-tab active" data-clock="stopwatch">Stopwatch</button>
+    <button class="clock-tab" data-clock="timer">Timer</button>
+  </div>
+  <div id="stopwatch-panel" class="clock-panel">
+    <div id="stopwatch-display" class="timer-display">00:00:00.00</div>
+    <div class="button-row">
+      <button id="stopwatch-start" class="send-button">Start</button>
+      <button id="stopwatch-pause" class="secondary-button">Pause</button>
+      <button id="stopwatch-lap" class="secondary-button">Lap</button>
+      <button id="stopwatch-reset" class="secondary-button">Reset</button>
+    </div>
+    <ol id="laps-list" class="laps-list"></ol>
+  </div>
+  <div id="timer-panel" class="clock-panel hidden">
+    <div id="timer-display" class="timer-display">00:00</div>
+    <div class="timer-inputs">
+      <label>Minutes<input id="timer-minutes" type="number" min="0" max="999" value="5" /></label>
+      <label>Seconds<input id="timer-seconds" type="number" min="0" max="59" value="0" /></label>
+    </div>
+    <div class="button-row">
+      <button id="timer-start" class="send-button">Start</button>
+      <button id="timer-pause" class="secondary-button">Pause</button>
+      <button id="timer-reset" class="secondary-button">Reset</button>
+    </div>
+    <button id="alarm-stop" class="alarm-stop hidden">Stop alarm</button>
+  </div>
+</section>

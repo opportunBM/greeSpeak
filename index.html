@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sign in to greeSpeak, your personal voice assistant." />
+    <title>Sign in | greeSpeak</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="login-screen">
+      <form id="login-form" class="login-card">
+        <a class="brand login-brand" href="/" aria-label="greeSpeak home"><span class="brand-mark" aria-hidden="true">g</span>greeSpeak</a>
+        <p class="eyebrow">Welcome back</p>
+        <h1>Sign in</h1>
+        <p class="login-description">Enter your email and password to continue.</p>
+        <label class="login-field">Email
+          <input id="login-email" type="email" autocomplete="username" required />
+        </label>
+        <label class="login-field">Password
+          <input id="login-password" type="password" autocomplete="current-password" required />
+        </label>
+        <p id="login-error" class="login-error" role="alert" aria-live="polite"></p>
+        <button class="send-button login-submit" type="submit">Sign in</button>
+      </form>
+    </main>
+    <script type="module" src="/src/login.js"></script>
+  </body>
+</html>

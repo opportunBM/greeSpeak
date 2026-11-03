@@ -1,0 +1,41 @@
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="/home.html"><span class="brand-mark" aria-hidden="true">g</span>greeSpeak</a>
+    <nav class="navigation" aria-label="Main navigation">
+      <a class="nav-button" data-nav="home" href="/home.html">Home</a>
+      <a class="nav-button" data-nav="notes" href="/notes.html">Notes</a>
+      <a class="nav-button" data-nav="calendar" href="/calendar.html">Calendar</a>
+      <a class="nav-button" data-nav="clock" href="/clock.html">Clock</a>
+    </nav>
+  </header>
+  <div id="page-content"><!-- page content --></div>
+  <section class="assistant-chat" aria-label="Assistant chat">
+    <div id="chat-messages" class="messages" aria-live="polite"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" type="text" placeholder="Type a message..." autocomplete="off" aria-label="Your message" />
+      <button class="send-button" type="submit">Send</button>
+    </form>
+    <div class="suggestions" aria-label="Suggested requests">
+      <button type="button" class="suggestion" data-prompt="What do I have planned?">Ask about my day</button>
+      <button type="button" class="suggestion" data-prompt="Open my notes">Open notes</button>
+      <button type="button" class="suggestion" data-prompt="Open the calendar">Open calendar</button>
+    </div>
+  </section>
+  <div class="assistant-visual">
+    <button id="mic-button" class="orb-button" type="button" aria-label="Start speaking">
+      <span class="orb-ring"></span>
+      <span class="orb-core">
+        <svg class="voice-icon voice-icon-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4m-4 0h8"/></svg>
+        <svg class="voice-icon voice-icon-speaker" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>
+      </span>
+    </button>
+    <div class="waveform" aria-hidden="true"></div>
+    <div class="status-pill"><span class="status-dot"></span><span id="voice-status" aria-live="polite">Ready</span></div>
+    <label class="voice-language">Voice language
+      <select id="voice-language" aria-label="Voice language">
+        <option value="en-US">English</option>
+        <option value="fr-FR">French</option>
+      </select>
+    </label>
+  </div>
+</div>
